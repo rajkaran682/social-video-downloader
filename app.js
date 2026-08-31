@@ -8,15 +8,17 @@ const status = document.querySelector("#status");
 const videoBtn = document.querySelector("#videoBtn");
 const audioBtn = document.querySelector("#audioBtn");
 
-const API = ""; // Same-origin. If frontend is hosted separately, set this to your API URL.
+// Render backend URL
+const API = "https://social-video-downloader-1qsa.onrender.com";
 
-function setStatus(text, error=false) {
+function setStatus(text, error = false) {
   status.textContent = text;
   status.style.color = error ? "#b42318" : "";
 }
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+
   const url = urlInput.value.trim();
   if (!url) return;
 
@@ -26,18 +28,26 @@ form.addEventListener("submit", async (e) => {
   try {
     const r = await fetch(`${API}/api/info`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({url})
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ url })
     });
+
     const data = await r.json();
 
-    if (!r.ok) throw new Error(data.error || "URL check failed");
+    if (!r.ok) {
+      throw new Error(data.error || "URL check failed");
+    }
 
     title.textContent = data.title || "Video";
+
     meta.textContent = [
       data.uploader,
       data.duration ? `${Math.round(data.duration)} sec` : ""
-    ].filter(Boolean).join(" • ");
+    ]
+      .filter(Boolean)
+      .join(" • ");
 
     if (data.thumbnail) {
       thumb.src = data.thumbnail;
@@ -48,12 +58,18 @@ form.addEventListener("submit", async (e) => {
     }
 
     const encoded = encodeURIComponent(url);
-    videoBtn.href = `/api/download?format=video&url=${encoded}`;
-    audioBtn.href = `/api/download?format=audio&url=${encoded}`;
+
+    videoBtn.href =
+      `${API}/api/download?format=video&url=${encoded}`;
+
+    audioBtn.href =
+      `${API}/api/download?format=audio&url=${encoded}`;
 
     result.classList.remove("hidden");
     setStatus("Ready — format चुनें।");
+
   } catch (err) {
-    setStatus(err.message, true);
+    console.error(err);
+    setStatus(err.message || "Something went wrong", true);
   }
 });

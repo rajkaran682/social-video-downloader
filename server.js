@@ -24,7 +24,13 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 app.use("/api/", limiter);
-
+app.get("/", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "social-video-downloader",
+    message: "API is running"
+  });
+});
 function validUrl(value) {
   try {
     const u = new URL(value);

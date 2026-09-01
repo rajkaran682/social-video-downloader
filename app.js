@@ -8,8 +8,8 @@ const status = document.querySelector("#status");
 const videoBtn = document.querySelector("#videoBtn");
 const audioBtn = document.querySelector("#audioBtn");
 
-// Render backend URL
-const API = "https://social-video-downloader-1qsa.onrender.com";
+// Same-origin API
+const API = "";
 
 function setStatus(text, error = false) {
   status.textContent = text;
@@ -20,7 +20,11 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   const url = urlInput.value.trim();
-  if (!url) return;
+
+  if (!url) {
+    setStatus("कृपया वीडियो URL डालें।", true);
+    return;
+  }
 
   result.classList.add("hidden");
   setStatus("Video information जाँची जा रही है…");
@@ -34,17 +38,37 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify({ url })
     });
 
-    const data = await r.json();
+    // पहले response को text के रूप में पढ़ेंगे
+    // ताकि HTML/error आने पर Unexpected token '<' न आए
+    const raw = await r.text();
+
+    let data = {};
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        `Server ने JSON के बजाय यह response दिया:\n\n${raw.slice(0, 1000)}`
+      );
+    }
 
     if (!r.ok) {
-      throw new Error(data.error || "URL check failed");
+      let message = data.error || "URL check failed";
+
+      if (data.detail) {
+        message += `\n\nअसली yt-dlp error:\n${data.detail}`;
+      }
+
+      throw new Error(message);
     }
 
     title.textContent = data.title || "Video";
 
     meta.textContent = [
       data.uploader,
-      data.duration ? `${Math.round(data.duration)} sec` : ""
+      data.duration
+        ? `${Math.round(data.duration)} sec`
+        : ""
     ]
       .filter(Boolean)
       .join(" • ");
@@ -60,16 +84,21 @@ form.addEventListener("submit", async (e) => {
     const encoded = encodeURIComponent(url);
 
     videoBtn.href =
-      `${API}/api/download?format=video&url=${encoded}`;
+      `/api/download?format=video&url=${encoded}`;
 
     audioBtn.href =
-      `${API}/api/download?format=audio&url=${encoded}`;
+      `/api/download?format=audio&url=${encoded}`;
 
     result.classList.remove("hidden");
+
     setStatus("Ready — format चुनें।");
 
   } catch (err) {
     console.error(err);
-    setStatus(err.message || "Something went wrong", true);
+
+    setStatus(
+      err.message || "Video information प्राप्त नहीं हो सकी।",
+      true
+    );
   }
 });

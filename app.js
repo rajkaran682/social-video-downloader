@@ -8,8 +8,8 @@ const status = document.querySelector("#status");
 const videoBtn = document.querySelector("#videoBtn");
 const audioBtn = document.querySelector("#audioBtn");
 
-// Same-origin API
-const API = "";
+// आपका Render Backend
+const API = "https://social-video-downloader-1qsa.onrender.com";
 
 function setStatus(text, error = false) {
   status.textContent = text;
@@ -38,11 +38,9 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify({ url })
     });
 
-    // पहले response को text के रूप में पढ़ेंगे
-    // ताकि HTML/error आने पर Unexpected token '<' न आए
     const raw = await r.text();
 
-    let data = {};
+    let data;
 
     try {
       data = JSON.parse(raw);
@@ -56,7 +54,7 @@ form.addEventListener("submit", async (e) => {
       let message = data.error || "URL check failed";
 
       if (data.detail) {
-        message += `\n\nअसली yt-dlp error:\n${data.detail}`;
+        message += `\n\nअसली error:\n${data.detail}`;
       }
 
       throw new Error(message);
@@ -83,18 +81,19 @@ form.addEventListener("submit", async (e) => {
 
     const encoded = encodeURIComponent(url);
 
+    // Download भी Render backend से होगा
     videoBtn.href =
-      `/api/download?format=video&url=${encoded}`;
+      `${API}/api/download?format=video&url=${encoded}`;
 
     audioBtn.href =
-      `/api/download?format=audio&url=${encoded}`;
+      `${API}/api/download?format=audio&url=${encoded}`;
 
     result.classList.remove("hidden");
 
     setStatus("Ready — format चुनें।");
 
   } catch (err) {
-    console.error(err);
+    console.error("API ERROR:", err);
 
     setStatus(
       err.message || "Video information प्राप्त नहीं हो सकी।",

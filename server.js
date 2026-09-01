@@ -31,6 +31,7 @@ const limiter = rateLimit({
 
 app.use("/api/", limiter);
 
+// Home
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
@@ -39,6 +40,7 @@ app.get("/", (_req, res) => {
   });
 });
 
+// URL validation
 function validUrl(value) {
   try {
     const u = new URL(value);
@@ -48,9 +50,13 @@ function validUrl(value) {
   }
 }
 
+// yt-dlp runner
 function runYtdlp(args, cwd) {
   return new Promise((resolve, reject) => {
-    const p = spawn(YTDLP, args, { cwd });
+    const p = spawn(YTDLP, args, {
+      cwd,
+      env: process.env
+    });
 
     let stdout = "";
     let stderr = "";
@@ -63,7 +69,9 @@ function runYtdlp(args, cwd) {
       stderr += d.toString();
     });
 
-    p.on("error", reject);
+    p.on("error", err => {
+      reject(err);
+    });
 
     p.on("close", code => {
       if (code === 0) {
@@ -71,8 +79,8 @@ function runYtdlp(args, cwd) {
       } else {
         reject(
           new Error(
-            stderr.slice(-4000) ||
-            `yt-dlp exited with ${code}`
+            stderr.slice(-6000) ||
+            `yt-dlp exited with code ${code}`
           )
         );
       }
@@ -80,6 +88,7 @@ function runYtdlp(args, cwd) {
   });
 }
 
+// Health check
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -87,6 +96,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// Video information
 app.post("/api/info", async (req, res) => {
   const url = req.body?.url?.trim();
 
@@ -103,6 +113,15 @@ app.post("/api/info", async (req, res) => {
         "--no-warnings",
         "--skip-download",
         "--no-playlist",
+
+        // YouTube JavaScript challenge support
+        "--js-runtimes",
+        "deno",
+
+        // Download EJS challenge scripts from npm
+        "--remote-components",
+        "ejs:npm",
+
         url
       ],
       process.cwd()
@@ -119,19 +138,18 @@ app.post("/api/info", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("INFO ERROR:", err);
+    console.error("YTDLP INFO ERROR:");
+    console.error(err);
 
+    // असली error frontend को दिखाएँ
     res.status(422).json({
-      error:
-        "इस URL की जानकारी प्राप्त नहीं हो सकी। URL सार्वजनिक और वैध होना चाहिए।",
-      detail:
-        process.env.NODE_ENV === "development"
-          ? err.message
-          : undefined
+      error: "yt-dlp से वीडियो की जानकारी नहीं मिली।",
+      detail: err.message || "Unknown yt-dlp error"
     });
   }
 });
 
+// Download
 app.get("/api/download", async (req, res) => {
   const url = String(req.query.url || "").trim();
 
@@ -160,6 +178,15 @@ app.get("/api/download", async (req, res) => {
       "--no-playlist",
       "--no-warnings",
       "--restrict-filenames",
+
+      // YouTube JavaScript challenge support
+      "--js-runtimes",
+      "deno",
+
+      // EJS challenge scripts
+      "--remote-components",
+      "ejs:npm",
+
       "-o",
       output
     ];
@@ -191,13 +218,13 @@ app.get("/api/download", async (req, res) => {
     const names = await readdir(work);
 
     const file = names.find(
-      n =>
-        !n.endsWith(".part") &&
-        !n.endsWith(".ytdl")
+      name =>
+        !name.endsWith(".part") &&
+        !name.endsWith(".ytdl")
     );
 
     if (!file) {
-      throw new Error("No output file");
+      throw new Error("No output file was created");
     }
 
     const full = path.join(work, file);
@@ -238,7 +265,8 @@ app.get("/api/download", async (req, res) => {
     stream.pipe(res);
 
   } catch (err) {
-    console.error("DOWNLOAD ERROR:", err);
+    console.error("YTDLP DOWNLOAD ERROR:");
+    console.error(err);
 
     await rm(work, {
       recursive: true,
@@ -246,15 +274,15 @@ app.get("/api/download", async (req, res) => {
     }).catch(() => {});
 
     if (!res.headersSent) {
-      res.status(422).send(
-        process.env.NODE_ENV === "development"
-          ? `Download failed: ${err.message}`
-          : "Download नहीं हो सका। यह URL समर्थित नहीं है या वीडियो उपलब्ध नहीं है।"
-      );
+      res.status(422).json({
+        error: "Download failed",
+        detail: err.message || "Unknown yt-dlp error"
+      });
     }
   }
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(
     `Social Video Downloader API running on port ${PORT}`

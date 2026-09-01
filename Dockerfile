@@ -1,49 +1,45 @@
 FROM node:24-bookworm
 
-# Basic packages
+# System packages
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        python3 \
        python3-pip \
        ffmpeg \
        git \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp + PO Token provider plugin
-RUN pip3 install \
+# Install yt-dlp and the matching PO Token plugin
+RUN python3 -m pip install \
     --break-system-packages \
     --no-cache-dir \
-    -U \
-    yt-dlp \
-    bgutil-ytdlp-pot-provider
+    "yt-dlp" \
+    "bgutil-ytdlp-pot-provider==1.3.1"
 
 WORKDIR /app
 
-# Install application dependencies
+# Application dependencies
 COPY package*.json ./
-
 RUN npm install --omit=dev
 
-# Copy application
-COPY . .
-
-# Build PO Token HTTP provider
-RUN git clone --depth 1 \
+# Build the PO Token HTTP provider
+RUN git clone \
+    --depth 1 \
+    --branch 1.3.1 \
     https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
     /opt/bgutil-provider \
     && cd /opt/bgutil-provider/server \
     && npm ci \
     && npx tsc
 
+# Application
+COPY . .
+
 ENV NODE_ENV=production
-
 ENV YTDLP_PATH=/usr/local/bin/yt-dlp
-
-# Tell yt-dlp where the PO Token server will run
-ENV YT_DLP_POT_PROVIDER_URL=http://127.0.0.1:4416
+ENV POT_PROVIDER_URL=http://127.0.0.1:4416
 
 EXPOSE 10000
 
-# Start PO Token server and then the main Node server
-CMD ["sh", "-c", "node /opt/bgutil-provider/server/build/main.js & sleep 3 && npm start"]
+# Start PO Token provider first, then the downloader API
+CMD ["sh", "-c", "node /opt/bgutil-provider/server/build/main.js & PROVIDER_PID=$!; sleep 5; if ! kill -0 $PROVIDER_PID 2>/dev/null; then echo 'PO Token provider failed to start'; exit 1; fi; exec npm start"]

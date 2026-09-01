@@ -1,16 +1,15 @@
 FROM node:24-bookworm
 
-# Python, FFmpeg और Deno install करें
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        python3 \
        python3-pip \
        ffmpeg \
-       curl \
+       git \
        unzip \
-    && curl -fsSL https://deno.land/install.sh | sh \
-    && ln -s /root/.deno/bin/deno /usr/local/bin/deno \
-    && python3 -m pip install --break-system-packages --upgrade "yt-dlp[default]" \
+    && pip3 install --break-system-packages --no-cache-dir -U \
+       yt-dlp \
+       bgutil-ytdlp-pot-provider \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

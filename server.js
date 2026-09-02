@@ -10,13 +10,9 @@ import crypto from "node:crypto";
 const app = express();
 
 const PORT = process.env.PORT || 10000;
-
-const YTDLP =
-  process.env.YTDLP_PATH || "yt-dlp";
-
+const YTDLP = process.env.YTDLP_PATH || "yt-dlp";
 const POT_PROVIDER_URL =
-  process.env.POT_PROVIDER_URL ||
-  "http://127.0.0.1:4416";
+  process.env.POT_PROVIDER_URL || "http://127.0.0.1:4416";
 
 app.set("trust proxy", 1);
 
@@ -40,7 +36,7 @@ app.use("/api/", limiter);
 
 
 // =====================================================
-// URL VALIDATION
+// URL
 // =====================================================
 
 function validUrl(value) {
@@ -70,9 +66,8 @@ function isYouTubeUrl(url) {
 
     return (
       hostname === "youtube.com" ||
-      hostname === "m.youtube.com" ||
-      hostname === "youtu.be" ||
-      hostname.endsWith(".youtube.com")
+      hostname.endsWith(".youtube.com") ||
+      hostname === "youtu.be"
     );
   } catch {
     return false;
@@ -88,7 +83,7 @@ function runYtdlp(args, cwd = os.tmpdir()) {
   return new Promise((resolve, reject) => {
     console.log("");
     console.log("========================================");
-    console.log("Running yt-dlp");
+    console.log("YT-DLP");
     console.log("========================================");
     console.log(YTDLP, args.join(" "));
     console.log("");
@@ -120,8 +115,8 @@ function runYtdlp(args, cwd = os.tmpdir()) {
       process.stderr.write(text);
     });
 
-    child.on("error", (err) => {
-      reject(err);
+    child.on("error", (error) => {
+      reject(error);
     });
 
     child.on("close", (code) => {
@@ -130,23 +125,25 @@ function runYtdlp(args, cwd = os.tmpdir()) {
           stdout,
           stderr,
         });
-      } else {
-        const error = new Error(
-          stderr.slice(-8000) ||
-            `yt-dlp exited with code ${code}`
-        );
 
-        error.code = code;
-
-        reject(error);
+        return;
       }
+
+      const error = new Error(
+        stderr.slice(-8000) ||
+          `yt-dlp exited with code ${code}`
+      );
+
+      error.code = code;
+
+      reject(error);
     });
   });
 }
 
 
 // =====================================================
-// YOUTUBE ARGUMENTS
+// YOUTUBE CONFIG
 // =====================================================
 
 function youtubeArgs(client = "mweb") {
@@ -167,10 +164,10 @@ function youtubeArgs(client = "mweb") {
 
 
 // =====================================================
-// GENERIC YT-DLP ARGUMENTS
+// COMMON
 // =====================================================
 
-function baseArgs() {
+function commonArgs() {
   return [
     "--no-warnings",
     "--no-playlist",
@@ -180,32 +177,29 @@ function baseArgs() {
 
 
 // =====================================================
-// ERROR CHECK
+// DETERMINE FALLBACK
 // =====================================================
 
-function shouldTryFallback(error) {
-  const message = String(
+function canFallback(error) {
+  const msg = String(
     error?.message || ""
   ).toLowerCase();
 
   return (
-    message.includes("login_required") ||
-    message.includes("sign in to confirm") ||
-    message.includes("not a bot") ||
-    message.includes("confirm you're not a bot") ||
-    message.includes("confirm you’re not a bot") ||
-    message.includes("video unavailable") ||
-    message.includes("http error 403") ||
-    message.includes("forbidden")
+    msg.includes("sign in to confirm") ||
+    msg.includes("you're not a bot") ||
+    msg.includes("you’re not a bot") ||
+    msg.includes("login_required") ||
+    msg.includes("http error 429")
   );
 }
 
 
 // =====================================================
-// GET INFO
+// INFO - YOUTUBE
 // =====================================================
 
-async function getVideoInfo(url) {
+async function getYouTubeInfo(url) {
   const common = [
     "--dump-single-json",
     "--skip-download",
@@ -213,61 +207,55 @@ async function getVideoInfo(url) {
     "--no-warnings",
   ];
 
-  // ---------------------------------------------------
-  // YouTube
-  // ---------------------------------------------------
+  // First attempt: mweb + PO token
+  try {
+    console.log("YouTube INFO: mweb");
 
-  if (isYouTubeUrl(url)) {
-    try {
-      console.log("YouTube detected: trying mweb");
+    const result = await runYtdlp([
+      ...common,
+      ...youtubeArgs("mweb"),
+      url,
+    ]);
 
-      const args = [
-        ...common,
-        ...youtubeArgs("mweb"),
-        url,
-      ];
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    console.error(
+      "YouTube mweb INFO failed:",
+      error.message
+    );
 
-      const result = await runYtdlp(args);
-
-      return JSON.parse(result.stdout);
-    } catch (firstError) {
-      console.error("");
-      console.error("YouTube mweb failed:");
-      console.error(firstError.message);
-
-      if (!shouldTryFallback(firstError)) {
-        throw firstError;
-      }
-
-      // -----------------------------------------------
-      // Fallback: TV client
-      // -----------------------------------------------
-
-      console.log("");
-      console.log("Trying YouTube TV fallback...");
-
-      const args = [
-        ...common,
-        ...youtubeArgs("tv"),
-        url,
-      ];
-
-      const result = await runYtdlp(args);
-
-      return JSON.parse(result.stdout);
+    // Second attempt only for known YouTube blocking
+    if (!canFallback(error)) {
+      throw error;
     }
+
+    console.log(
+      "YouTube INFO fallback: tv"
+    );
+
+    const result = await runYtdlp([
+      ...common,
+      ...youtubeArgs("tv"),
+      url,
+    ]);
+
+    return JSON.parse(result.stdout);
   }
+}
 
-  // ---------------------------------------------------
-  // Other supported sites
-  // ---------------------------------------------------
 
-  const args = [
-    ...common,
+// =====================================================
+// INFO - OTHER SITES
+// =====================================================
+
+async function getOtherInfo(url) {
+  const result = await runYtdlp([
+    "--dump-single-json",
+    "--skip-download",
+    "--no-playlist",
+    "--no-warnings",
     url,
-  ];
-
-  const result = await runYtdlp(args);
+  ]);
 
   return JSON.parse(result.stdout);
 }
@@ -322,7 +310,9 @@ app.post("/api/info", async (req, res) => {
     console.log("URL:", url);
     console.log("========================================");
 
-    const data = await getVideoInfo(url);
+    const data = isYouTubeUrl(url)
+      ? await getYouTubeInfo(url)
+      : await getOtherInfo(url);
 
     return res.json({
       ok: true,
@@ -352,7 +342,6 @@ app.post("/api/info", async (req, res) => {
     console.error("========================================");
     console.error("INFO ERROR");
     console.error("========================================");
-
     console.error(error);
 
     return res.status(500).json({
@@ -373,7 +362,7 @@ app.post("/api/info", async (req, res) => {
 
 
 // =====================================================
-// DOWNLOAD API
+// DOWNLOAD
 // =====================================================
 
 app.get("/api/download", async (req, res) => {
@@ -386,7 +375,9 @@ app.get("/api/download", async (req, res) => {
     });
   }
 
-  if (!["video", "audio"].includes(format)) {
+  if (
+    !["video", "audio"].includes(format)
+  ) {
     return res.status(400).json({
       ok: false,
       error: "Invalid format",
@@ -405,37 +396,32 @@ app.get("/api/download", async (req, res) => {
   try {
     console.log("");
     console.log("========================================");
-    console.log("DOWNLOAD REQUEST");
+    console.log("DOWNLOAD");
     console.log("FORMAT:", format);
     console.log("URL:", url);
-    console.log("TEMP:", tempDir);
     console.log("========================================");
 
-    let args = [
-      ...baseArgs(),
-    ];
+    const isYT = isYouTubeUrl(url);
 
     // -------------------------------------------------
-    // YouTube
+    // AUDIO
     // -------------------------------------------------
-
-    if (isYouTubeUrl(url)) {
-      args.push(
-        ...youtubeArgs("mweb")
-      );
-    }
-
-    // -------------------------------------------------
-    // Output
-    // -------------------------------------------------
-
-    let outputFile;
 
     if (format === "audio") {
       const outputTemplate = path.join(
         tempDir,
         "audio.%(ext)s"
       );
+
+      const args = [
+        ...commonArgs(),
+      ];
+
+      if (isYT) {
+        args.push(
+          ...youtubeArgs("mweb")
+        );
+      }
 
       args.push(
         "-x",
@@ -448,241 +434,185 @@ app.get("/api/download", async (req, res) => {
         url
       );
 
-      await runYtdlp(
-        args,
-        tempDir
-      );
-
-      const mp3Files = fs
-        .readdirSync(tempDir)
-        .filter(
-          (file) =>
-            file.toLowerCase().endsWith(".mp3")
-        );
-
-      if (!mp3Files.length) {
-        throw new Error(
-          "MP3 output file नहीं मिली।"
-        );
-      }
-
-      outputFile = path.join(
-        tempDir,
-        mp3Files[0]
-      );
-    } else {
-      const outputTemplate = path.join(
-        tempDir,
-        "video.%(ext)s"
-      );
-
-      args.push(
-        "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
-
-        "--merge-output-format",
-        "mp4",
-
-        "-o",
-        outputTemplate,
-
-        url
-      );
-
       try {
         await runYtdlp(
           args,
           tempDir
         );
-      } catch (firstError) {
-        console.error("");
+      } catch (error) {
         console.error(
-          "Video mweb download failed:"
+          "Audio first attempt failed:",
+          error.message
         );
-
-        console.error(
-          firstError.message
-        );
-
-        // ---------------------------------------------
-        // YouTube TV fallback
-        // ---------------------------------------------
 
         if (
-          isYouTubeUrl(url) &&
-          shouldTryFallback(firstError)
+          isYT &&
+          canFallback(error)
         ) {
-          console.log("");
           console.log(
-            "Trying YouTube TV download fallback..."
+            "Audio fallback: YouTube tv"
           );
 
-          args = [
-            ...baseArgs(),
+          const fallbackArgs = [
+            ...commonArgs(),
 
             ...youtubeArgs("tv"),
 
-            "-f",
-            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
-
-            "--merge-output-format",
-            "mp4",
-
+            "-x",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "128K",
             "-o",
             outputTemplate,
-
             url,
           ];
 
           await runYtdlp(
-            args,
+            fallbackArgs,
             tempDir
           );
         } else {
-          throw firstError;
+          throw error;
         }
       }
 
-      const mp4Files = fs
+      const files = fs
         .readdirSync(tempDir)
         .filter(
           (file) =>
-            file.toLowerCase().endsWith(".mp4")
+            file
+              .toLowerCase()
+              .endsWith(".mp3")
         );
 
-      if (!mp4Files.length) {
+      if (!files.length) {
         throw new Error(
-          "MP4 output file नहीं मिली।"
+          "MP3 output file नहीं मिली।"
         );
       }
 
-      outputFile = path.join(
+      const filePath = path.join(
         tempDir,
-        mp4Files[0]
+        files[0]
+      );
+
+      return sendFile(
+        req,
+        res,
+        filePath,
+        tempDir,
+        "download.mp3",
+        "audio/mpeg"
       );
     }
 
-    // -------------------------------------------------
-    // Validate output
-    // -------------------------------------------------
-
-    if (
-      !outputFile ||
-      !fs.existsSync(outputFile)
-    ) {
-      throw new Error(
-        "Output file नहीं मिली।"
-      );
-    }
-
-    const stat =
-      fs.statSync(outputFile);
-
-    if (!stat.isFile()) {
-      throw new Error(
-        "Output file invalid है।"
-      );
-    }
-
-    if (stat.size <= 0) {
-      throw new Error(
-        "Output file खाली है।"
-      );
-    }
 
     // -------------------------------------------------
-    // Response headers
+    // VIDEO
     // -------------------------------------------------
 
-    const filename =
-      format === "audio"
-        ? "download.mp3"
-        : "download.mp4";
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`
+    const outputTemplate = path.join(
+      tempDir,
+      "video.%(ext)s"
     );
 
-    res.setHeader(
-      "Content-Length",
-      stat.size
+    const args = [
+      ...commonArgs(),
+    ];
+
+    if (isYT) {
+      args.push(
+        ...youtubeArgs("mweb")
+      );
+    }
+
+    args.push(
+      "-f",
+      "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+
+      "--merge-output-format",
+      "mp4",
+
+      "-o",
+      outputTemplate,
+
+      url
     );
 
-    res.setHeader(
-      "Content-Type",
-      format === "audio"
-        ? "audio/mpeg"
-        : "video/mp4"
-    );
-
-    // -------------------------------------------------
-    // Stream
-    // -------------------------------------------------
-
-    const stream =
-      fs.createReadStream(
-        outputFile
+    try {
+      await runYtdlp(
+        args,
+        tempDir
+      );
+    } catch (error) {
+      console.error(
+        "Video first attempt failed:",
+        error.message
       );
 
-    let cleaned = false;
-
-    const cleanup = () => {
-      if (cleaned) return;
-
-      cleaned = true;
-
-      try {
-        fs.rmSync(
-          tempDir,
-          {
-            recursive: true,
-            force: true,
-          }
+      if (
+        isYT &&
+        canFallback(error)
+      ) {
+        console.log(
+          "Video fallback: YouTube tv"
         );
-      } catch (cleanupError) {
-        console.error(
-          "Cleanup error:",
-          cleanupError
+
+        const fallbackArgs = [
+          ...commonArgs(),
+
+          ...youtubeArgs("tv"),
+
+          "-f",
+          "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+
+          "--merge-output-format",
+          "mp4",
+
+          "-o",
+          outputTemplate,
+
+          url,
+        ];
+
+        await runYtdlp(
+          fallbackArgs,
+          tempDir
         );
+      } else {
+        throw error;
       }
-    };
+    }
 
-    stream.on(
-      "error",
-      (err) => {
-        console.error(
-          "STREAM ERROR:",
-          err
-        );
+    const files = fs
+      .readdirSync(tempDir)
+      .filter(
+        (file) =>
+          file
+            .toLowerCase()
+            .endsWith(".mp4")
+      );
 
-        cleanup();
+    if (!files.length) {
+      throw new Error(
+        "MP4 output file नहीं मिली।"
+      );
+    }
 
-        if (!res.headersSent) {
-          res.status(500).json({
-            ok: false,
-            error:
-              "Download stream failed",
-          });
-        } else {
-          res.destroy(err);
-        }
-      }
+    const filePath = path.join(
+      tempDir,
+      files[0]
     );
 
-    stream.on(
-      "close",
-      cleanup
+    return sendFile(
+      req,
+      res,
+      filePath,
+      tempDir,
+      "download.mp4",
+      "video/mp4"
     );
-
-    res.on(
-      "close",
-      cleanup
-    );
-
-    stream.pipe(res);
-
-    return;
   } catch (error) {
     console.error("");
     console.error("========================================");
@@ -721,6 +651,119 @@ app.get("/api/download", async (req, res) => {
 
 
 // =====================================================
+// SEND FILE
+// =====================================================
+
+function sendFile(
+  req,
+  res,
+  filePath,
+  tempDir,
+  filename,
+  contentType
+) {
+  if (
+    !filePath ||
+    !fs.existsSync(filePath)
+  ) {
+    throw new Error(
+      "Output file नहीं मिली।"
+    );
+  }
+
+  const stat =
+    fs.statSync(filePath);
+
+  if (!stat.isFile()) {
+    throw new Error(
+      "Output file invalid है।"
+    );
+  }
+
+  if (stat.size <= 0) {
+    throw new Error(
+      "Output file खाली है।"
+    );
+  }
+
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`
+  );
+
+  res.setHeader(
+    "Content-Length",
+    stat.size
+  );
+
+  res.setHeader(
+    "Content-Type",
+    contentType
+  );
+
+  const stream =
+    fs.createReadStream(filePath);
+
+  let cleaned = false;
+
+  const cleanup = () => {
+    if (cleaned) return;
+
+    cleaned = true;
+
+    try {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    } catch (error) {
+      console.error(
+        "Cleanup error:",
+        error
+      );
+    }
+  };
+
+  stream.on(
+    "error",
+    (error) => {
+      console.error(
+        "STREAM ERROR:",
+        error
+      );
+
+      cleanup();
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          ok: false,
+          error:
+            "Download stream failed",
+        });
+      } else {
+        res.destroy(error);
+      }
+    }
+  );
+
+  stream.on(
+    "close",
+    cleanup
+  );
+
+  res.on(
+    "close",
+    cleanup
+  );
+
+  stream.pipe(res);
+}
+
+
+// =====================================================
 // 404
 // =====================================================
 
@@ -735,7 +778,7 @@ app.use((req, res) => {
 
 
 // =====================================================
-// SERVER
+// START
 // =====================================================
 
 app.listen(
@@ -744,20 +787,25 @@ app.listen(
   () => {
     console.log("");
     console.log("========================================");
-    console.log("SOCIAL VIDEO DOWNLOADER API");
+    console.log("SOCIAL VIDEO DOWNLOADER");
     console.log("========================================");
+
     console.log(
       `Server running on port ${PORT}`
     );
+
     console.log(
       `yt-dlp: ${YTDLP}`
     );
+
     console.log(
       `PO Token Provider: ${POT_PROVIDER_URL}`
     );
+
     console.log(
       `Node: ${process.version}`
     );
+
     console.log("========================================");
   }
 );

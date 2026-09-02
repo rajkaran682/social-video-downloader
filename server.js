@@ -2,381 +2,411 @@ import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { spawn } from "node:child_process";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import { tmpdir } from "node:os";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const app = express();
 
-const PORT = Number(process.env.PORT || 10000);
-const YTDLP = process.env.YTDLP_PATH || "/usr/local/bin/yt-dlp";
+const PORT = process.env.PORT || 10000;
+const YTDLP = process.env.YTDLP_PATH || "yt-dlp";
 const POT_PROVIDER_URL =
   process.env.POT_PROVIDER_URL || "http://127.0.0.1:4416";
 
-// --------------------------------------------------
-// CORS
-// --------------------------------------------------
+/*
+ * Render is behind a reverse proxy.
+ * This prevents express-rate-limit from rejecting
+ * the X-Forwarded-For header.
+ */
+app.set("trust proxy", 1);
 
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || "*",
-    methods: ["GET", "POST", "OPTIONS"]
+    methods: ["GET", "POST", "OPTIONS"],
   })
 );
 
-// --------------------------------------------------
-// JSON
-// --------------------------------------------------
-
 app.use(express.json({ limit: "20kb" }));
-
-// Render reverse proxy
-app.set("trust proxy", 1);
-
-// --------------------------------------------------
-// RATE LIMIT
-// --------------------------------------------------
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 
 app.use("/api/", limiter);
 
-// --------------------------------------------------
-// HOME
-// --------------------------------------------------
-
-app.get("/", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "social-video-downloader",
-    message: "API is running"
-  });
-});
-
-// --------------------------------------------------
-// HEALTH
-// --------------------------------------------------
-
-app.get("/api/health", async (_req, res) => {
-  res.json({
-    ok: true,
-    service: "social-video-downloader",
-    yt_dlp: YTDLP,
-    po_token_provider: POT_PROVIDER_URL
-  });
-});
-
-// --------------------------------------------------
-// URL VALIDATION
-// --------------------------------------------------
+// ----------------------------------------------------
+// Helpers
+// ----------------------------------------------------
 
 function validUrl(value) {
-  if (!value || typeof value !== "string") {
-    return false;
-  }
-
   try {
-    const u = new URL(value.trim());
+    const u = new URL(value);
 
     return (
-      (u.protocol === "http:" || u.protocol === "https:") &&
-      !!u.hostname
+      u.protocol === "http:" ||
+      u.protocol === "https:"
     );
   } catch {
     return false;
   }
 }
 
-// --------------------------------------------------
-// RUN YT-DLP
-// --------------------------------------------------
-
-function runYtdlp(args, cwd = process.cwd()) {
+function runYtdlp(args, cwd = os.tmpdir()) {
   return new Promise((resolve, reject) => {
-    const finalArgs = [
-      "--no-warnings",
-
-      // YouTube JavaScript challenge support
-      "--js-runtimes",
-      "node",
-
-      // yt-dlp EJS components
-      "--remote-components",
-      "ejs:github",
-
-      // IMPORTANT:
-      // bgutil PO Token HTTP provider
-      "--extractor-args",
-      `youtubepot-bgutilhttp:base_url=${POT_PROVIDER_URL}`,
-
-      ...args
-    ];
-
     console.log("Running yt-dlp:");
-    console.log(YTDLP, finalArgs.join(" "));
+    console.log(YTDLP, args.join(" "));
 
-    const child = spawn(YTDLP, finalArgs, {
+    const child = spawn(YTDLP, args, {
       cwd,
-      env: process.env
+      env: {
+        ...process.env,
+        HOME: "/tmp",
+      },
     });
 
     let stdout = "";
     let stderr = "";
 
     child.stdout.on("data", (data) => {
-      stdout += data.toString();
+      const text = data.toString();
+      stdout += text;
+      process.stdout.write(text);
     });
 
     child.stderr.on("data", (data) => {
-      stderr += data.toString();
+      const text = data.toString();
+      stderr += text;
+      process.stderr.write(text);
     });
 
-    child.on("error", (error) => {
-      reject(error);
+    child.on("error", (err) => {
+      reject(err);
     });
 
     child.on("close", (code) => {
       if (code === 0) {
-        resolve(stdout);
-        return;
+        resolve({
+          stdout,
+          stderr,
+        });
+      } else {
+        const error = new Error(
+          stderr.slice(-6000) ||
+            `yt-dlp exited with code ${code}`
+        );
+
+        error.code = code;
+
+        reject(error);
       }
-
-      const errorText =
-        stderr.trim() ||
-        stdout.trim() ||
-        `yt-dlp exited with code ${code}`;
-
-      reject(new Error(errorText));
     });
   });
 }
 
-// --------------------------------------------------
-// VIDEO INFO
-// --------------------------------------------------
+// ----------------------------------------------------
+// YouTube / yt-dlp arguments
+// ----------------------------------------------------
+
+function youtubeArgs() {
+  return [
+    "--no-warnings",
+
+    /*
+     * Current yt-dlp recommended approach:
+     * mweb + PO Token Provider
+     */
+    "--extractor-args",
+    "youtube:player_client=mweb",
+
+    /*
+     * Tell bgutil plugin where its local HTTP
+     * PO Token provider is running.
+     */
+    "--extractor-args",
+    `youtubepot-bgutilhttp:base_url=${POT_PROVIDER_URL}`,
+  ];
+}
+
+// ----------------------------------------------------
+// Health
+// ----------------------------------------------------
+
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    service: "social-video-downloader",
+    message: "API is running",
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "social-video-downloader",
+    ytdlp: YTDLP,
+    poTokenProvider: POT_PROVIDER_URL,
+  });
+});
+
+// ----------------------------------------------------
+// INFO
+// ----------------------------------------------------
 
 app.post("/api/info", async (req, res) => {
-  const url = req.body?.url?.trim();
+  const { url } = req.body || {};
 
-  if (!validUrl(url)) {
+  if (!url || !validUrl(url)) {
     return res.status(400).json({
-      error: "Valid HTTP/HTTPS URL डालें।"
+      ok: false,
+      error: "कृपया एक सही public URL डालें।",
     });
   }
 
   try {
-    const output = await runYtdlp([
+    const args = [
       "--dump-single-json",
       "--skip-download",
       "--no-playlist",
 
-      // mweb is the client recommended by current
-      // yt-dlp PO Token guidance
-      "--extractor-args",
-      "youtube:player_client=mweb",
+      ...youtubeArgs(),
 
-      url
-    ]);
+      url,
+    ];
 
-    const info = JSON.parse(output);
+    const result = await runYtdlp(args);
+
+    const data = JSON.parse(result.stdout);
 
     return res.json({
-      title: info.title || "Video",
-      thumbnail: info.thumbnail || "",
-      duration: Number(info.duration || 0),
+      ok: true,
+      title: data.title || "",
+      thumbnail: data.thumbnail || "",
+      duration: data.duration || 0,
       uploader:
-        info.uploader ||
-        info.channel ||
+        data.uploader ||
+        data.channel ||
         "",
       webpage_url:
-        info.webpage_url ||
-        url
+        data.webpage_url ||
+        url,
     });
   } catch (error) {
     console.error("INFO ERROR:");
-    console.error(error.message);
+    console.error(error);
 
-    return res.status(422).json({
-      error: "yt-dlp से वीडियो की जानकारी नहीं मिली।",
-      detail: error.message
+    return res.status(500).json({
+      ok: false,
+      error:
+        "वीडियो की जानकारी प्राप्त नहीं हो सकी।",
+      details:
+        process.env.NODE_ENV === "development"
+          ? String(error.message || error)
+          : undefined,
     });
   }
 });
 
-// --------------------------------------------------
+// ----------------------------------------------------
 // DOWNLOAD
-// --------------------------------------------------
+// ----------------------------------------------------
 
 app.get("/api/download", async (req, res) => {
-  const url = String(req.query.url || "").trim();
+  const { format, url } = req.query;
 
-  const format =
-    req.query.format === "audio"
-      ? "audio"
-      : "video";
-
-  if (!validUrl(url)) {
+  if (!url || !validUrl(url)) {
     return res.status(400).json({
-      error: "Invalid URL"
+      ok: false,
+      error: "Invalid URL",
     });
   }
 
-  const work = await mkdtemp(
-    path.join(tmpdir(), "social-video-")
-  );
-
-  let cleaned = false;
-
-  async function cleanup() {
-    if (cleaned) return;
-
-    cleaned = true;
-
-    await rm(work, {
-      recursive: true,
-      force: true
-    }).catch(() => {});
+  if (!["video", "audio"].includes(format)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid format",
+    });
   }
 
-  try {
-    const output = path.join(
-      work,
-      "%(title).80s-%(id)s.%(ext)s"
-    );
+  const tempDir = path.join(
+    os.tmpdir(),
+    `social-${crypto.randomUUID()}`
+  );
 
-    const args = [
+  fs.mkdirSync(tempDir, {
+    recursive: true,
+  });
+
+  try {
+    let args = [
+      "--no-warnings",
       "--no-playlist",
       "--restrict-filenames",
 
-      "-o",
-      output,
-
-      // Current YouTube client
-      "--extractor-args",
-      "youtube:player_client=mweb"
+      ...youtubeArgs(),
     ];
 
-    // ----------------------------------------------
-    // AUDIO
-    // ----------------------------------------------
+    let outputTemplate;
 
     if (format === "audio") {
+      outputTemplate = path.join(
+        tempDir,
+        "audio.%(ext)s"
+      );
+
       args.push(
         "-x",
         "--audio-format",
         "mp3",
         "--audio-quality",
-        "128K"
+        "128K",
+        "-o",
+        outputTemplate,
+        url
       );
-    }
+    } else {
+      outputTemplate = path.join(
+        tempDir,
+        "video.%(ext)s"
+      );
 
-    // ----------------------------------------------
-    // VIDEO
-    // ----------------------------------------------
-
-    else {
       args.push(
         "-f",
         "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
         "--merge-output-format",
-        "mp4"
+        "mp4",
+        "-o",
+        outputTemplate,
+        url
       );
     }
 
-    args.push(url);
+    await runYtdlp(args, tempDir);
 
-    await runYtdlp(args);
-
-    const files = await readdir(work);
-
-    const file = files.find((name) => {
-      return (
-        !name.endsWith(".part") &&
-        !name.endsWith(".ytdl") &&
-        !name.endsWith(".temp") &&
-        !name.endsWith(".json")
+    const files = fs
+      .readdirSync(tempDir)
+      .filter(
+        (file) =>
+          file !== "." &&
+          file !== ".."
       );
-    });
 
-    if (!file) {
+    if (!files.length) {
       throw new Error(
         "yt-dlp ने कोई output file नहीं बनाई।"
       );
     }
 
-    const fullPath = path.join(work, file);
+    const file = path.join(
+      tempDir,
+      files[0]
+    );
 
-    const extension =
-      path.extname(file).toLowerCase();
+    const stat = fs.statSync(file);
 
-    let mime = "video/mp4";
-
-    if (extension === ".mp3") {
-      mime = "audio/mpeg";
-    } else if (extension === ".m4a") {
-      mime = "audio/mp4";
-    } else if (extension === ".webm") {
-      mime = "video/webm";
+    if (!stat.isFile()) {
+      throw new Error(
+        "Output file invalid है।"
+      );
     }
 
-    res.setHeader("Content-Type", mime);
+    const filename =
+      format === "audio"
+        ? "download.mp3"
+        : "download.mp4";
 
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${file.replace(
-        /["\\]/g,
-        "_"
-      )}"`
+      `attachment; filename="${filename}"`
     );
 
-    const stream = createReadStream(fullPath);
+    res.setHeader(
+      "Content-Length",
+      stat.size
+    );
 
-    stream.on("error", async (error) => {
+    res.setHeader(
+      "Content-Type",
+      format === "audio"
+        ? "audio/mpeg"
+        : "video/mp4"
+    );
+
+    const stream = fs.createReadStream(file);
+
+    stream.on("error", (err) => {
       console.error(
         "STREAM ERROR:",
-        error.message
+        err
       );
 
-      await cleanup();
-    });
-
-    stream.on("close", async () => {
-      await cleanup();
+      if (!res.headersSent) {
+        res.status(500).json({
+          ok: false,
+          error: "Download stream failed",
+        });
+      } else {
+        res.destroy(err);
+      }
     });
 
     stream.pipe(res);
+
+    stream.on("close", () => {
+      fs.rmSync(tempDir, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    return;
   } catch (error) {
     console.error("DOWNLOAD ERROR:");
-    console.error(error.message);
+    console.error(error);
 
-    await cleanup();
+    fs.rmSync(tempDir, {
+      recursive: true,
+      force: true,
+    });
 
     if (!res.headersSent) {
-      return res.status(422).json({
-        error: "Download नहीं हो सका।",
-        detail: error.message
+      return res.status(500).json({
+        ok: false,
+        error:
+          "वीडियो डाउनलोड नहीं हो सका।",
+        details:
+          process.env.NODE_ENV === "development"
+            ? String(error.message || error)
+            : undefined,
       });
     }
   }
 });
 
-// --------------------------------------------------
-// START
-// --------------------------------------------------
+// ----------------------------------------------------
+// 404
+// ----------------------------------------------------
+
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Endpoint not found",
+    path: req.path,
+    method: req.method,
+  });
+});
+
+// ----------------------------------------------------
+// Start
+// ----------------------------------------------------
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
-    `Social Video Downloader API running on port ${PORT}`
-  );
-
-  console.log(
-    `yt-dlp: ${YTDLP}`
+    `Server running on port ${PORT}`
   );
 
   console.log(

@@ -1,6 +1,5 @@
 FROM node:24-bookworm
 
-# System packages
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
@@ -15,27 +14,23 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install application dependencies
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# Install bgutil PO Token provider
+# Build bgutil HTTP PO Token server
 RUN git clone --depth 1 --branch 1.3.1 \
     https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
-    /opt/bgutil-ytdlp-pot-provider \
-    && cd /opt/bgutil-ytdlp-pot-provider/server \
+    /opt/bgutil \
+    && cd /opt/bgutil/server \
     && npm ci \
     && npx tsc
 
-# Copy application
 COPY . .
 
-# Environment
 ENV NODE_ENV=production
 ENV YTDLP_PATH=/usr/local/bin/yt-dlp
 ENV POT_PROVIDER_URL=http://127.0.0.1:4416
 
 EXPOSE 10000
 
-# Start PO Token provider + downloader server
-CMD ["sh", "-c", "node /opt/bgutil-ytdlp-pot-provider/server/build/main.js & sleep 3 && npm start"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & POT_PID=$!; sleep 5; echo '===== YT-DLP VERSION ====='; yt-dlp --version; echo '===== YT-DLP PLUGINS ====='; yt-dlp -v --simulate https://youtu.be/rirmp7ZQvXs 2>&1 | head -80; echo '===== STARTING APP ====='; npm start; kill $POT_PID"]

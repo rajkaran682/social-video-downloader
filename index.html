@@ -3,53 +3,195 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+
   <title>Social Video Downloader</title>
-  <meta name="description" content="Download publicly accessible videos you are allowed to save.">
+
+  <meta name="description"
+        content="Download publicly accessible videos you are allowed to save. Fast, simple and mobile friendly.">
+
+  <meta name="robots" content="index,follow">
+
   <link rel="stylesheet" href="style.css">
+
+  <!-- Adsterra / Website Script -->
+  <script src="https://pl31164448.profitableratecpmnetwork.com/7c/8d/aa/7c8daa220528757d22d46161e26ce4df.js"></script>
 </head>
+
 <body>
+
   <main class="wrap">
+
     <section class="hero">
-      <div class="badge">FAST • SIMPLE • MOBILE FRIENDLY</div>
+
+      <div class="badge">
+        FAST • SIMPLE • MOBILE FRIENDLY
+      </div>
+
       <h1>Social Video Downloader</h1>
-      <p>Public video URL डालें और उपलब्ध होने पर वीडियो या ऑडियो डाउनलोड करें।</p>
+
+      <p>
+        Public video URL डालें और उपलब्ध होने पर वीडियो या ऑडियो डाउनलोड करें।
+      </p>
 
       <form id="form">
-        <input id="url" type="url" required
+
+        <input
+          id="url"
+          type="url"
+          required
           placeholder="https://example.com/video..."
-          autocomplete="off">
-        <button id="checkBtn" type="submit">Check Video</button>
+          autocomplete="off"
+          aria-label="Video URL"
+        >
+
+        <button id="checkBtn" type="submit">
+          Check Video
+        </button>
+
       </form>
 
       <p class="note">
         केवल वही सामग्री डाउनलोड करें जिसे डाउनलोड करने की आपको अनुमति है।
         Private, login-required या DRM-protected content के लिए यह टूल नहीं है।
       </p>
+
     </section>
 
-    <section id="result" class="card hidden">
-      <img id="thumb" alt="" class="thumb">
-      <div class="info">
-        <h2 id="title">Video</h2>
-        <p id="meta"></p>
-        <div class="actions">
-          <a id="videoBtn" class="btn primary" href="#">Download MP4</a>
-          <a id="audioBtn" class="btn secondary" href="#">Download MP3</a>
-        </div>
+
+    <!-- 300x250 Advertisement -->
+    <section class="ad-box" aria-label="Advertisement">
+
+      <div class="ad-label">
+        Advertisement
       </div>
+
+      <div class="ad-content">
+
+        <script>
+          atOptions = {
+            'key' : 'eee55ebb577b2b2dce83a52a0a596d2d',
+            'format' : 'iframe',
+            'height' : 250,
+            'width' : 300,
+            'params' : {}
+          };
+        </script>
+
+        <script src="https://www.highrevenueformat.com/eee55ebb577b2b2dce83a52a0a596d2d/invoke.js"></script>
+
+      </div>
+
     </section>
+
+
+    <!-- Result -->
+    <section id="result" class="card hidden">
+
+      <img
+        id="thumb"
+        alt="Video thumbnail"
+        class="thumb"
+      >
+
+      <div class="info">
+
+        <h2 id="title">
+          Video
+        </h2>
+
+        <p id="meta"></p>
+
+        <div class="actions">
+
+          <a
+            id="videoBtn"
+            class="btn primary"
+            href="#"
+          >
+            Download MP4
+          </a>
+
+          <a
+            id="audioBtn"
+            class="btn secondary"
+            href="#"
+          >
+            Download MP3
+          </a>
+
+        </div>
+
+      </div>
+
+    </section>
+
 
     <div id="status" class="status"></div>
 
+
     <section class="how">
+
       <h2>कैसे काम करता है?</h2>
+
       <div class="steps">
-        <div><b>1</b><span>Public video URL paste करें</span></div>
-        <div><b>2</b><span>Server URL की जानकारी जाँचता है</span></div>
-        <div><b>3</b><span>उपलब्ध format में file तैयार होती है</span></div>
+
+        <div>
+          <b>1</b>
+          <span>Public video URL paste करें</span>
+        </div>
+
+        <div>
+          <b>2</b>
+          <span>Server URL की जानकारी जाँचता है</span>
+        </div>
+
+        <div>
+          <b>3</b>
+          <span>उपलब्ध format में file तैयार होती है</span>
+        </div>
+
       </div>
+
     </section>
+
+
+    <section class="info-section">
+
+      <h2>Social Video Downloader</h2>
+
+      <p>
+        यह वेबसाइट सार्वजनिक रूप से उपलब्ध वीडियो URL की जानकारी प्राप्त
+        करने और उपलब्ध होने पर डाउनलोड विकल्प प्रदान करने के लिए बनाई गई है।
+      </p>
+
+      <p>
+        कृपया केवल ऐसी सामग्री डाउनलोड करें जिसे डाउनलोड और सेव करने का
+        आपको अधिकार या अनुमति प्राप्त है।
+      </p>
+
+    </section>
+
+
+    <footer class="footer">
+
+      <a href="privacy.html">Privacy Policy</a>
+
+      <a href="terms.html">Terms of Use</a>
+
+      <a href="dmca.html">DMCA</a>
+
+      <a href="contact.html">Contact</a>
+
+      <p>
+        © 2026 Social Video Downloader
+      </p>
+
+    </footer>
+
   </main>
+
+
   <script src="app.js"></script>
+
 </body>
 </html>
